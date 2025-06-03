@@ -8,8 +8,8 @@ from modules.audio import mel_spectrogram
 
 
 duration_setting = {
-    "min": 1.0,
-    "max": 30.0,
+    "min": 0.5,
+    "max": 10.0,
 }
 # assume single speaker
 def to_mel_fn(wave, mel_fn_args):
@@ -23,19 +23,25 @@ class FT_Dataset(torch.utils.data.Dataset):
         sr=22050,
         batch_size=1,
     ):
-        self.data_path = data_path
+
         self.data = []
-        for root, _, files in os.walk(data_path):
-            for file in files:
-                if file.endswith((".wav", ".mp3", ".flac", ".ogg", ".m4a", ".opus")):
-                    self.data.append(os.path.join(root, file))
+        with open('/speechfs03/users/siyi/online/startts/startts/egs2/speed_vqvae/filelists_speed/train.list', 'r') as f:
+            lines = f.readlines()
+            for line in lines:
+                wav_path = line.strip().split('|')[1]
+                # wav_path = wav_path.replace('开拓者\(女\)', '开拓者(女)').replace('开拓者\(男\)', '开拓者(男)').replace('\ ', ' ')
+                self.data.append(wav_path)
+        print('--- total nums: {}'.format(len(self.data)))
+        # random.seed(12345)
+        random.shuffle(self.data)
+
 
         self.sr = sr
         self.mel_fn_args = {
             "n_fft": spect_params['n_fft'],
-            "win_size": spect_params.get('win_length', spect_params.get('win_size', 1024)),
-            "hop_size": spect_params.get('hop_length', spect_params.get('hop_size', 256)),
-            "num_mels": spect_params.get('n_mels', spect_params.get('num_mels', 80)),
+            "win_size": spect_params['win_length'],
+            "hop_size": spect_params['hop_length'],
+            "num_mels": spect_params['n_mels'],
             "sampling_rate": sr,
             "fmin": spect_params['fmin'],
             "fmax": None if spect_params['fmax'] == "None" else spect_params['fmax'],
@@ -52,16 +58,20 @@ class FT_Dataset(torch.utils.data.Dataset):
     def __getitem__(self, idx):
         idx = idx % len(self.data)
         wav_path = self.data[idx]
+        wav_path = wav_path.replace('开拓者\(女\)', '开拓者(女)').replace('开拓者\(男\)', '开拓者(男)').replace('\ ', ' ')
         try:
             speech, orig_sr = librosa.load(wav_path, sr=self.sr)
+            if speech.shape[0] > orig_sr * duration_setting["max"]:
+                start = random.randint(0, speech.shape[0] - orig_sr * duration_setting["max"] -1 )
+                speech = speech[start : start + int(orig_sr * duration_setting["max"])]
         except Exception as e:
             print(f"Failed to load wav file with error {e}")
             return self.__getitem__(random.randint(0, len(self)))
-        if len(speech) < self.sr * duration_setting["min"] or len(speech) > self.sr * duration_setting["max"]:
-            print(f"Audio {wav_path} is too short or too long, skipping")
+        if len(speech) < self.sr * duration_setting["min"]:
+            print(f"Audio {wav_path} is too short or too short, skipping")
             return self.__getitem__(random.randint(0, len(self)))
-        if orig_sr != self.sr:
-            speech = librosa.resample(speech, orig_sr, self.sr)
+        # if orig_sr != self.sr:
+        #     speech = librosa.resample(speech, orig_sr, self.sr)
 
         wave = torch.from_numpy(speech).float().unsqueeze(0)
         mel = to_mel_fn(wave, self.mel_fn_args).squeeze(0)
@@ -77,6 +87,7 @@ def build_ft_dataloader(data_path, spect_params, sr, batch_size=1, num_workers=0
         shuffle=True,
         num_workers=num_workers,
         collate_fn=collate,
+        prefetch_factor=4
     )
     return dataloader
 

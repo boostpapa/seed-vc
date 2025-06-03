@@ -6,6 +6,7 @@ from torch.nn import functional as F
 from munch import Munch
 import json
 import argparse
+from torch.nn.parallel import DistributedDataParallel as DDP
 
 def str2bool(v):
     if isinstance(v, bool):
@@ -384,17 +385,52 @@ def normalize_f0(f0_sequence):
     return normalized_sequence
 
 
-def build_model(args, stage="DiT"):
-    if stage == "DiT":
+class MyModel(nn.Module):
+    def __init__(self,args):
+        super(MyModel, self).__init__()
         from modules.flow_matching import CFM
         from modules.length_regulator import InterpolateRegulator
-
+        
         length_regulator = InterpolateRegulator(
             channels=args.length_regulator.channels,
             sampling_ratios=args.length_regulator.sampling_ratios,
             is_discrete=args.length_regulator.is_discrete,
             in_channels=args.length_regulator.in_channels if hasattr(args.length_regulator, "in_channels") else None,
+            vector_quantize=args.length_regulator.vector_quantize if hasattr(args.length_regulator, "vector_quantize") else False,
             codebook_size=args.length_regulator.content_codebook_size,
+            n_codebooks=args.length_regulator.n_codebooks if hasattr(args.length_regulator, "n_codebooks") else 1,
+            quantizer_dropout=args.length_regulator.quantizer_dropout if hasattr(args.length_regulator, "quantizer_dropout") else 0.0,
+            f0_condition=args.length_regulator.f0_condition if hasattr(args.length_regulator, "f0_condition") else False,
+            n_f0_bins=args.length_regulator.n_f0_bins if hasattr(args.length_regulator, "n_f0_bins") else 512,
+        )
+
+        self.models = nn.ModuleDict({
+            'cfm': CFM(args),
+            'length_regulator': length_regulator 
+        })
+    
+    def forward(self, x, target_lengths, prompt_len, cond, y):
+        x = self.models['cfm'](x, target_lengths, prompt_len, cond, y)
+        return x
+    
+    def forward2(self, S_ori,target_lengths,F0_ori):
+        x = self.models['length_regulator'](S_ori, ylens=target_lengths, f0=F0_ori)
+        return x
+
+def build_model(args, stage="DiT"):
+    if stage == "DiT":
+        from modules.flow_matching import CFM
+        from modules.length_regulator import InterpolateRegulator
+        
+        length_regulator = InterpolateRegulator(
+            channels=args.length_regulator.channels,
+            sampling_ratios=args.length_regulator.sampling_ratios,
+            is_discrete=args.length_regulator.is_discrete,
+            in_channels=args.length_regulator.in_channels if hasattr(args.length_regulator, "in_channels") else None,
+            vector_quantize=args.length_regulator.vector_quantize if hasattr(args.length_regulator, "vector_quantize") else False,
+            codebook_size=args.length_regulator.content_codebook_size,
+            n_codebooks=args.length_regulator.n_codebooks if hasattr(args.length_regulator, "n_codebooks") else 1,
+            quantizer_dropout=args.length_regulator.quantizer_dropout if hasattr(args.length_regulator, "quantizer_dropout") else 0.0,
             f0_condition=args.length_regulator.f0_condition if hasattr(args.length_regulator, "f0_condition") else False,
             n_f0_bins=args.length_regulator.n_f0_bins if hasattr(args.length_regulator, "n_f0_bins") else 512,
         )
@@ -403,6 +439,47 @@ def build_model(args, stage="DiT"):
             cfm=cfm,
             length_regulator=length_regulator,
         )
+        
+    elif stage == 'codec':
+        from dac.model.dac import Encoder
+        from modules.quantize import (
+            FAquantizer,
+        )
+
+        encoder = Encoder(
+            d_model=args.DAC.encoder_dim,
+            strides=args.DAC.encoder_rates,
+            d_latent=1024,
+            causal=args.causal,
+            lstm=args.lstm,
+        )
+
+        quantizer = FAquantizer(
+            in_dim=1024,
+            n_p_codebooks=1,
+            n_c_codebooks=args.n_c_codebooks,
+            n_t_codebooks=2,
+            n_r_codebooks=3,
+            codebook_size=1024,
+            codebook_dim=8,
+            quantizer_dropout=0.5,
+            causal=args.causal,
+            separate_prosody_encoder=args.separate_prosody_encoder,
+            timbre_norm=args.timbre_norm,
+        )
+
+        nets = Munch(
+            encoder=encoder,
+            quantizer=quantizer,
+        )
+
+    elif stage == "mel_vocos":
+        from modules.vocos import Vocos
+        decoder = Vocos(args)
+        nets = Munch(
+            decoder=decoder,
+        )
+
     else:
         raise ValueError(f"Unknown stage: {stage}")
 
@@ -466,6 +543,63 @@ def load_checkpoint(
 
     return model, optimizer, epoch, iters
 
+def load_checkpoint2(
+    model,
+    optimizer,
+    path,
+    load_only_params=True,
+    ignore_modules=[],
+    is_distributed=False,
+    load_ema=False,
+):
+    state = torch.load(path, map_location="cpu")
+    params = state["net"]
+    if load_ema and "ema" in state:
+        print("Loading EMA")
+        for key in model.models:
+            i = 0
+            for param_name in params[key]:
+                if "input_pos" in param_name:
+                    continue
+                assert params[key][param_name].shape == state["ema"][key][0][i].shape
+                params[key][param_name] = state["ema"][key][0][i].clone()
+                i += 1
+    for key in model.models:
+        if key in params and key not in ignore_modules:
+            if not is_distributed:
+                # strip prefix of DDP (module.), create a new OrderedDict that does not contain the prefix
+                for k in list(params[key].keys()):
+                    if k.startswith("module."):
+                        params[key][k[len("module.") :]] = params[key][k]
+                        del params[key][k]
+            model_state_dict = model.models[key].state_dict()
+            # 过滤出形状匹配的键值对
+            filtered_state_dict = {
+                k: v
+                for k, v in params[key].items()
+                if k in model_state_dict and v.shape == model_state_dict[k].shape
+            }
+            skipped_keys = set(params[key].keys()) - set(filtered_state_dict.keys())
+            if skipped_keys:
+                print(
+                    f"Warning: Skipped loading some keys due to shape mismatch: {skipped_keys}"
+                )
+            print("%s loaded" % key)
+            model.models[key].load_state_dict(filtered_state_dict, strict=False)
+    model.eval()
+#     _ = [model[key].eval() for key in model]
+
+    if not load_only_params:
+        epoch = state["epoch"] + 1
+        iters = state["iters"]
+        optimizer.load_state_dict(state["optimizer"])
+        optimizer.load_scheduler_state_dict(state["scheduler"])
+
+    else:
+        epoch = 0
+        iters = 0
+
+    return model, optimizer, epoch, iters
 
 def recursive_munch(d):
     if isinstance(d, dict):
