@@ -12,6 +12,7 @@ import torchaudio.compliance.kaldi as kaldi
 import glob
 from tqdm import tqdm
 import shutil
+from pathlib import Path
 from random import randint
 
 from modules.commons import recursive_munch, build_model, load_checkpoint2, MyModel
@@ -43,7 +44,7 @@ class Trainer:
                  config_path,
                  pretrained_ckpt_path,
                  data_dir,
-                 run_name,
+                 exp_dir,
                  batch_size=0,
                  num_workers=0,
                  steps=1000,
@@ -58,7 +59,7 @@ class Trainer:
         self.device = device
         
         config = yaml.safe_load(open(config_path))
-        self.log_dir = os.path.join(config['log_dir'], run_name)
+        self.log_dir = Path(exp_dir)
         os.makedirs(self.log_dir, exist_ok=True)
         # copy config file to log dir
         shutil.copyfile(config_path, os.path.join(self.log_dir, os.path.basename(config_path)))
@@ -477,11 +478,11 @@ if __name__ == '__main__':
     parser.add_argument('--config', type=str, default='./configs/presets/config_dit_mel_seed_uvit_xlsr_tiny.yml')
     parser.add_argument('--pretrained-ckpt', type=str, default=None)
     parser.add_argument('--dataset-dir', type=str, default='/path/to/dataset')
-    parser.add_argument('--run-name', type=str, default='my_run')
+    parser.add_argument('--exp-dir', type=str, default='exp')
     parser.add_argument('--batch-size', type=int, default=2)
     parser.add_argument('--max-steps', type=int, default=1000)
     parser.add_argument('--max-epochs', type=int, default=1000)
-    parser.add_argument('--save-every', type=int, default=500)
+    parser.add_argument('--save-every', type=int, default=5004)
     parser.add_argument('--num-workers', type=int, default=0)
     parser.add_argument('--n-gpus', type=int, default=5)
     
