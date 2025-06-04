@@ -89,7 +89,7 @@ class Trainer:
         )
         self.f0_condition = config['model_params']['DiT'].get('f0_condition', False)
         self.build_sv_model(device, config)
-        self.build_semantic_fn(device, config)
+        #self.build_semantic_fn(device, config)
         if self.f0_condition:
             self.build_f0_fn(device, config)
 #         self.build_converter(device, config)
@@ -210,14 +210,34 @@ class Trainer:
     def build_semantic_fn(self, device, config):
         speech_tokenizer_type = config['model_params']['speech_tokenizer'].get('type', 'cosyvoice')
         if speech_tokenizer_type == 'wav2vecbert':
-            from wav2vecbert_extract_new import Extract_wav2vectbert
-            Extract_feature = Extract_wav2vectbert(device)
-            
+            from transformers import (
+                SeamlessM4TFeatureExtractor,
+                Wav2Vec2BertModel,
+            )
+            # Load semantic model
+            self.feature_extractor = SeamlessM4TFeatureExtractor.from_pretrained(config['dataset']['semantic_model_path'])
+            self.semantic_model = Wav2Vec2BertModel.from_pretrained(self.cfg.dataset['semantic_model_path'])
+            self.semantic_model.eval().to(device)
+            self.stat_mean_var = torch.load(self.cfg.dataset['semantic_mean_var_path'])
+            self.semantic_mean = self.stat_mean_var["mean"].to(device)
+            self.semantic_std = torch.sqrt(self.stat_mean_var["var"]).to(device)
             def semantic_fn(waves_16k):
                 speech = waves_16k.cpu().numpy()
-                feat = Extract_feature.feature_extract(speech)
-                feat, _ = self.dvae.get_codebook_indices(feat.transpose(1,2))
-                return feat #[1,620,1024] 
+                output = self.feature_extractor.feature_extract(speech, return_attention_mask=True)
+                input_features = torch.from_numpy(output["input_features"]).to(device)
+                attention_mask = torch.from_numpy(output["attention_mask"]).to(device)
+                with torch.no_grad():
+                    outputs = self.semantic_model(
+                                input_features=input_features,
+                                attention_mask=attention_mask,
+                                output_hidden_states=True,
+                    )
+                    emb = outputs.hidden_states[17]  # (B, T, C)
+                    emb = (emb - self.semantic_mean) / self.semantic_std
+                    emb = emb * attention_mask.unsqueeze(-1)
+                    emb = emb.transpose(1, 2)
+                    semantic_code = self.dvae.get_codebook_indices(emb)
+                return semantic_code #[1,620,1024] 
         
         elif speech_tokenizer_type == 'whisper':
             from transformers import AutoFeatureExtractor, WhisperModel
