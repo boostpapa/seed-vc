@@ -18,39 +18,32 @@ def to_mel_fn(wave, mel_fn_args):
 class FT_Dataset(torch.utils.data.Dataset):
     def __init__(
         self,
-        data_path,
+        datafile,
         spect_params,
-        sr=22050,
-        batch_size=1,
     ):
 
         self.data = []
-        with open('/speechfs03/users/siyi/online/startts/startts/egs2/speed_vqvae/filelists_speed/train.list', 'r') as f:
+        with open(datafile, 'r', encoding='utf8') as f:
             lines = f.readlines()
             for line in lines:
                 wav_path = line.strip().split('|')[1]
-                # wav_path = wav_path.replace('开拓者\(女\)', '开拓者(女)').replace('开拓者\(男\)', '开拓者(男)').replace('\ ', ' ')
                 self.data.append(wav_path)
         print('--- total nums: {}'.format(len(self.data)))
         # random.seed(12345)
         random.shuffle(self.data)
 
 
-        self.sr = sr
+        self.sr = spect_params['sample_rate']
         self.mel_fn_args = {
             "n_fft": spect_params['n_fft'],
             "win_size": spect_params['win_length'],
             "hop_size": spect_params['hop_length'],
             "num_mels": spect_params['n_mels'],
-            "sampling_rate": sr,
+            "sampling_rate": spect_params['sample_rate'],
             "fmin": spect_params['fmin'],
             "fmax": None if spect_params['fmax'] == "None" else spect_params['fmax'],
             "center": False
         }
-
-        assert len(self.data) != 0
-        while len(self.data) < batch_size:
-            self.data += self.data
 
     def __len__(self):
         return len(self.data)

@@ -69,14 +69,10 @@ class Trainer:
         self.log_interval = config.get('log_interval', 10)
         self.save_interval = save_interval
 
-        self.sr = config['preprocess_params'].get('sr', 22050)
-        self.hop_length = config['preprocess_params']['spect_params'].get('hop_length', 256)
-        self.win_length = config['preprocess_params']['spect_params'].get('win_length', 1024)
-        self.n_fft = config['preprocess_params']['spect_params'].get('n_fft', 1024)
-        preprocess_params = config['preprocess_params']
+        self.sr = config['dataset']['mel'].get('sample_rate', 22050)
         
         # DataLoader with DistributedSampler
-        self.train_dataset = FT_Dataset(data_dir, preprocess_params['spect_params'], self.sr, batch_size)
+        self.train_dataset = FT_Dataset(config['dataset']['training_files'], config['dataset']['mel'])
         
         self.train_sampler = DistributedSampler(self.train_dataset) if self.n_gpu > 1 else None
         
