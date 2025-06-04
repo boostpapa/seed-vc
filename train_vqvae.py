@@ -459,7 +459,7 @@ def main(rank,args):
         config_path=args.config,
         pretrained_ckpt_path=args.pretrained_ckpt,
         data_dir=args.dataset_dir,
-        run_name=args.run_name,
+        exp_dir=args.exp_dir,
         batch_size=args.batch_size,
         steps=args.max_steps,
         max_epochs=args.max_epochs,

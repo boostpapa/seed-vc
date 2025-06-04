@@ -7,7 +7,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torchaudio
 from einops import rearrange
-from indextts.vqvae.ssim import SSIM
+from modules.vqvae.ssim import SSIM
 
 
 def default(val, d):
@@ -357,7 +357,7 @@ class DiscreteVAE(nn.Module):
         elif quantizer == "simvq":
             self.codebook = SimQuantize(codebook_dim, num_tokens, new_return_order=True)
         elif quantizer == "fsq":
-            from indextts.vqvae.quantizers import FSQ
+            from modules.vqvae.quantizers import FSQ
             self.codebook = FSQ(levels=quantizer_args['levels'])
 
         # take care of normalization within class
