@@ -23,7 +23,7 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 import torch.distributed as dist 
 
 from omegaconf import OmegaConf
-from xtts_dvae import DiscreteVAE
+from modules.vqvae.xtts_dvae import DiscreteVAE
 import re
 
 def load_checkpoint(model: torch.nn.Module, model_pth: str) -> dict:
@@ -151,9 +151,8 @@ class Trainer:
             print("Failed to load any checkpoint, training from scratch.")
 
         ## load vqvae model ##
-        gpt_cfg = OmegaConf.load('data/gpt.yaml')
-        self.dvae = DiscreteVAE(**gpt_cfg['vqvae'])
-        dvae_path = '/speechfs03/users/siyi/exp/newword/startts/startts/examples/vqvae/exp/vqvae_scode/epoch_9.pth'
+        self.dvae = DiscreteVAE(**config['vqvae'])
+        dvae_path = config.dvae_checkpoint
         load_checkpoint(self.dvae, dvae_path)
         self.dvae.eval()
         self.dvae = self.dvae.to(device)
