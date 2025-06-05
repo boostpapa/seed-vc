@@ -89,7 +89,7 @@ class Trainer:
         )
         self.f0_condition = config['model_params']['DiT'].get('f0_condition', False)
         self.build_sv_model(device, config)
-        #self.build_semantic_fn(device, config)
+        self.build_semantic_fn(device, config)
         if self.f0_condition:
             self.build_f0_fn(device, config)
 #         self.build_converter(device, config)
@@ -149,7 +149,7 @@ class Trainer:
 
         ## load vqvae model ##
         self.dvae = DiscreteVAE(**config['vqvae'])
-        dvae_path = config.dvae_checkpoint
+        dvae_path = config['dvae_checkpoint']
         load_checkpoint(self.dvae, dvae_path)
         self.dvae.eval()
         self.dvae = self.dvae.to(device)
@@ -216,14 +216,14 @@ class Trainer:
             )
             # Load semantic model
             self.feature_extractor = SeamlessM4TFeatureExtractor.from_pretrained(config['dataset']['semantic_model_path'])
-            self.semantic_model = Wav2Vec2BertModel.from_pretrained(self.cfg.dataset['semantic_model_path'])
+            self.semantic_model = Wav2Vec2BertModel.from_pretrained(config['dataset']['semantic_model_path'])
             self.semantic_model.eval().to(device)
-            self.stat_mean_var = torch.load(self.cfg.dataset['semantic_mean_var_path'])
+            self.stat_mean_var = torch.load(config['dataset']['semantic_mean_var_path'])
             self.semantic_mean = self.stat_mean_var["mean"].to(device)
             self.semantic_std = torch.sqrt(self.stat_mean_var["var"]).to(device)
             def semantic_fn(waves_16k):
                 speech = waves_16k.cpu().numpy()
-                output = self.feature_extractor.feature_extract(speech, return_attention_mask=True)
+                output = self.feature_extractor(speech, return_attention_mask=True)
                 input_features = torch.from_numpy(output["input_features"]).to(device)
                 attention_mask = torch.from_numpy(output["attention_mask"]).to(device)
                 with torch.no_grad():
@@ -236,8 +236,8 @@ class Trainer:
                     emb = (emb - self.semantic_mean) / self.semantic_std
                     emb = emb * attention_mask.unsqueeze(-1)
                     emb = emb.transpose(1, 2)
-                    semantic_code = self.dvae.get_codebook_indices(emb)
-                return semantic_code #[1,620,1024] 
+                    feat, code = self.dvae.get_codebook_indices(emb)
+                return feat #[1,620,1024] 
         
         elif speech_tokenizer_type == 'whisper':
             from transformers import AutoFeatureExtractor, WhisperModel
@@ -332,7 +332,7 @@ class Trainer:
             F0_ori = None
 
         ori_cond, _, ori_codes, ori_commitment_loss, ori_codebook_loss = (
-            self.model.module.forward2(S_ori, target_lengths, F0_ori)
+            self.model.forward2(S_ori, target_lengths, F0_ori)
         )
         if ori_commitment_loss is None:
             ori_commitment_loss = 0
@@ -437,7 +437,8 @@ class Trainer:
         self.loss_smoothing_rate = 0.99
         for epoch in range(self.n_epochs):
             self.epoch = epoch
-            self.train_sampler.set_epoch(self.epoch)
+            if self.n_gpu > 1:
+                self.train_sampler.set_epoch(self.epoch)
             self.train_one_epoch(rank)
             # Save after each epoch
             if rank==0:
@@ -510,5 +511,6 @@ if __name__ == '__main__':
     # os.environ["CUDA_VISIBLE_DEVICES"] = "0,2,3,4,5"
     os.environ["MASTER_ADDR"] = "localhost"
     os.environ["MASTER_PORT"] = str(randint(11451, 41919))
-    args.n_gpus = torch.cuda.device_count()
-    mp.spawn(main, nprocs=args.n_gpus, args=(args,))
+    #args.n_gpus = torch.cuda.device_count()
+    main(0, args)
+    #mp.spawn(main, nprocs=args.n_gpus, args=(args,))

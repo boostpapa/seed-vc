@@ -4,7 +4,7 @@ import torch.nn as nn
 from torch.nn import functional as F
 from modules.commons import sequence_mask
 import numpy as np
-from dac.nn.quantize import VectorQuantize
+#from dac.nn.quantize import VectorQuantize
 
 # f0_bin = 256
 f0_max = 1100.0

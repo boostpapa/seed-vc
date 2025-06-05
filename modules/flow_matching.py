@@ -32,19 +32,21 @@ class BASECFM(torch.nn.Module, ABC):
         """Forward diffusion
 
         Args:
-            mu (torch.Tensor): output of encoder
-                shape: (batch_size, n_feats, mel_timesteps)
-            mask (torch.Tensor): output_mask
-                shape: (batch_size, 1, mel_timesteps)
+            mu (torch.Tensor): semantic info of reference audio and altered audio
+                shape: (batch_size, mel_timesteps(795+1069), 512)
+            x_lens (torch.Tensor): mel frames output
+                shape: (batch_size, mel_timesteps)
+            prompt (torch.Tensor): reference mel
+                shape: (batch_size, 80, 795)
+            style (torch.Tensor): reference global style
+                shape: (batch_size, 192)
+            f0: None
             n_timesteps (int): number of diffusion steps
             temperature (float, optional): temperature for scaling noise. Defaults to 1.0.
-            spks (torch.Tensor, optional): speaker ids. Defaults to None.
-                shape: (batch_size, spk_emb_dim)
-            cond: Not used but kept for future purposes
 
         Returns:
             sample: generated mel-spectrogram
-                shape: (batch_size, n_feats, mel_timesteps)
+                shape: (batch_size, 80, mel_timesteps)
         """
         B, T = mu.size(0), mu.size(1)
         z = torch.randn([B, self.in_channels, T], device=mu.device) * temperature
@@ -59,13 +61,14 @@ class BASECFM(torch.nn.Module, ABC):
             x (torch.Tensor): random noise
             t_span (torch.Tensor): n_timesteps interpolated
                 shape: (n_timesteps + 1,)
-            mu (torch.Tensor): output of encoder
-                shape: (batch_size, n_feats, mel_timesteps)
-            mask (torch.Tensor): output_mask
-                shape: (batch_size, 1, mel_timesteps)
-            spks (torch.Tensor, optional): speaker ids. Defaults to None.
-                shape: (batch_size, spk_emb_dim)
-            cond: Not used but kept for future purposes
+            mu (torch.Tensor): semantic info of reference audio and altered audio
+                shape: (batch_size, mel_timesteps(795+1069), 512)
+            x_lens (torch.Tensor): mel frames output
+                shape: (batch_size, mel_timesteps)
+            prompt (torch.Tensor): reference mel
+                shape: (batch_size, 80, 795)
+            style (torch.Tensor): reference global style
+                shape: (batch_size, 192)
         """
         t, _, _ = t_span[0], t_span[-1], t_span[1] - t_span[0]
 
@@ -114,14 +117,15 @@ class BASECFM(torch.nn.Module, ABC):
         """Computes diffusion loss
 
         Args:
-            x1 (torch.Tensor): Target
-                shape: (batch_size, n_feats, mel_timesteps)
-            mask (torch.Tensor): target mask
-                shape: (batch_size, 1, mel_timesteps)
-            mu (torch.Tensor): output of encoder
-                shape: (batch_size, n_feats, mel_timesteps)
-            spks (torch.Tensor, optional): speaker embedding. Defaults to None.
-                shape: (batch_size, spk_emb_dim)
+            mu (torch.Tensor): semantic info of reference audio and altered audio
+                shape: (batch_size, mel_timesteps(795+1069), 512)
+            x1: mel
+            x_lens (torch.Tensor): mel frames output
+                shape: (batch_size, mel_timesteps)
+            prompt (torch.Tensor): reference mel
+                shape: (batch_size, 80, 795)
+            style (torch.Tensor): reference global style
+                shape: (batch_size, 192)
 
         Returns:
             loss: conditional flow matching loss

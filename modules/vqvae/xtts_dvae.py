@@ -394,7 +394,7 @@ class DiscreteVAE(nn.Module):
         logits = self.encoder(img).permute((0, 2, 3, 1) if len(img.shape) == 4 else (0, 2, 1))
         sampled, codes, _ = self.codebook(logits)
         # self.log_codes(codes)
-        return codes
+        return sampled, codes
 
     def decode(self, img_seq):
         # self.log_codes(img_seq)
